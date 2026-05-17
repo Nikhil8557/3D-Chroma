@@ -1,5 +1,7 @@
 import numpy as np
 import json
+from sklearn.manifold import MDS
+from scipy.ndimage import gaussian_filter1d
 
 # 1. Load your .npy EPI heatmap
 heatmap = np.load("epi_interactions.npy") 
@@ -20,21 +22,32 @@ for i in range(N):
                 "color": "#ff3333" if score > 0.7 else "#f39c12" # Color by intensity
             })
 
-# 3. Create mock 3D coordinates (If you don't already have them from something like Pastis/3DMax)
-# For the sake of example, generating a random walk
-x, y, z = [0.0], [0.0], [0.0]
-for i in range(1, N):
-    x.append(x[-1] + np.random.randn())
-    y.append(y[-1] + np.random.randn())
-    z.append(z[-1] + np.random.randn())
+distance_matrix = 1.0 / (heatmap + 1e-5)
 
-# 4. Construct the final JSON object
+# Optional: Cap max distance to prevent unconnected regions from flying off to infinity
+max_dist = np.percentile(distance_matrix, 95)
+distance_matrix = np.clip(distance_matrix, 0, max_dist)
+
+# 3. Use Multidimensional Scaling (MDS) to solve 3D coordinates
+print("Folding chromatin in 3D using MDS...")
+mds = MDS(n_components=3, dissimilarity="precomputed", random_state=42, n_init=1, max_iter=300)
+coords3d = mds.fit_transform(distance_matrix)
+
+x, y, z = coords3d[:, 0], coords3d[:, 1], coords3d[:, 2]
+
+# 4. Smooth the result for aesthetic rendering (persistence length)
+sigma = 1.5 
+x = gaussian_filter1d(x, sigma)
+y = gaussian_filter1d(y, sigma)
+z = gaussian_filter1d(z, sigma)
+
+# 5. Export
 js_data = {
-    "x": x,
-    "y": y,
-    "z": z,
+    "x": x.tolist(),
+    "y": y.tolist(),
+    "z": z.tolist(),
     "colors": ["#5dade2"] * N,
-    "ev": [0.5] * N, # Eigenvector for Compartments A/B
+    "ev": [0.5] * N,
     "loops": loops,
     "tad_boundaries": [] 
 }
