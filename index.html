@@ -478,30 +478,26 @@ if(typeof SYNC !== 'undefined') {
     bind3dCtrl('ctrl-loops', () => C3D.setShowLoops(!C3D.showLoops));
     bind3dCtrl('ctrl-comp', () => C3D.setShowComp(!C3D.showComp));
     bind3dCtrl('ctrl-reset', () => C3D.reset());
-
-    // ==========================================
-    // 4. GENERATE MOCK DATA & START
-    // ==========================================
-    const mockData = { x: [], y: [], z: [], colors: [], ev: [], loops: [], tad_boundaries: [10, 25, 40] };
     
-    // Generate an artificial 3D helical structure
-    for (let i = 0; i < 50; i++) {
-      mockData.x.push(Math.sin(i * 0.4) * 8 + (Math.random()-0.5));
-      mockData.y.push(Math.cos(i * 0.4) * 8 + (Math.random()-0.5));
-      mockData.z.push(i * 0.8 - 20);
-      mockData.colors.push(i % 2 === 0 ? '#5dade2' : '#2ecc71');
-      mockData.ev.push(i > 25 ? 0.8 : 0.2); 
+ // ==========================================
+ // 4. FETCH DATA
+ // ==========================================
+    
+   fetch('./chromatin_data.json')
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`GitHub returned a ${response.status} error. File not found!`);
     }
-
-    // Mock EPI interaction loops
-    mockData.loops = [
-      { a: 5, b: 15, score: 0.9, color: '#ff3333' },
-      { a: 20, b: 35, score: 0.6, color: '#f39c12' },
-      { a: 10, b: 45, score: 0.8, color: '#9b59b6' }
-    ];
-
-    C3D.load(mockData);
+    return response.json();
+  })
+  .then(realData => {
+    C3D.load(realData);
     C3D.start();
+  })
+  .catch(error => {
+    console.error("Data loading failed:", error);
+    alert("Could not load chromatin_data.json. Check your Developer Console (F12). \n\nError: " + error.message);
+  });
   </script>
 </body>
 </html>
