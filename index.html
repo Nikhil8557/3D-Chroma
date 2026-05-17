@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <title>3D Chromatin Viewer Test</title>
+  <style>
+    body { background: #0f172a; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+    #viewer3d { width: 600px; height: 600px; background: #000; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); cursor: grab; }
+    #viewer3d:active { cursor: grabbing; }
+    .controls { margin-top: 15px; display: flex; gap: 10px; }
+    button { padding: 8px 12px; cursor: pointer; background: #334155; color: white; border: none; border-radius: 6px; }
+    button.on { background: #3b82f6; }
+  </style>
+</head>
+<body>
+
+  <!-- The Canvas -->
+  <canvas id="viewer3d"></canvas>
+  
+  <!-- Controls -->
+  <div class="controls">
+    <button id="ctrl-rot">Auto-Rot: On</button>
+    <button id="ctrl-loops">Loops: On</button>
+    <button id="ctrl-comp">Compartments: On</button>
+    <button id="ctrl-reset">Reset View</button>
+    <span id="v3d-n-loops" style="display:none;"></span>
+    <span id="v3d-n-tads" style="display:none;"></span>
+  </div>
+
+  <!-- 1. DEFINE DEPENDENCIES FIRST -->
+  <script>
+    const $ = id => document.getElementById(id);
+    const SYNC = { on: ()=>{}, emit: ()=>{}, clear: ()=>{} };
+    function hexA(hex, alpha) {
+      if (!hex || !hex.startsWith('#')) return hex || 'rgba(0,0,0,0)';
+      let c = hex.substring(1).split('');
+      if (c.length === 3) c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+      c = '0x' + c.join('');
+      return `rgba(${(c>>16)&255}, ${(c>>8)&255}, ${c&255}, ${alpha})`;
+    }
+  </script>
+
+  <!-- 2. LOAD YOUR C3D SCRIPT SECOND -->
+  <script src="C3D1.js"></script>
+
+  <!-- 3. GENERATE DATA AND START THIRD -->
+  <script>
+    // --- GENERATE MOCK BIOLOGICAL DATA ---
+    const mockData = {
+      x: [], y: [], z: [], colors: [], ev: [],
+      loops: [], tad_boundaries: [10, 25, 40]
+    };
+
+    // Generate a helix/fractal globule-like backbone
+    for (let i = 0; i < 50; i++) {
+      mockData.x.push(Math.sin(i * 0.4) * 8 + (Math.random()-0.5));
+      mockData.y.push(Math.cos(i * 0.4) * 8 + (Math.random()-0.5));
+      mockData.z.push(i * 0.8 - 20);
+      mockData.colors.push(i % 2 === 0 ? '#5dade2' : '#2ecc71');
+      mockData.ev.push(i > 25 ? 0.8 : 0.2); // Simulating A/B compartments
+    }
+
+    // Generate mock EPI loops with high scores
+    mockData.loops = [
+      { a: 5, b: 15, score: 0.9, color: '#ff3333' },
+      { a: 20, b: 35, score: 0.6, color: '#f39c12' },
+      { a: 10, b: 45, score: 0.8, color: '#9b59b6' }
+    ];
+
+    // --- LOAD & START ---
+    C3D.load(mockData);
+    C3D.start();
+  </script>
+</body>
+</html>
