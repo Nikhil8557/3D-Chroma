@@ -1,3 +1,14 @@
+const $ = id => document.getElementById(id);
+const SYNC = { on: ()=>{}, emit: ()=>{}, clear: ()=>{} }; // Mock SYNC if you don't have a real one
+
+function hexA(hex, alpha) {
+  if (!hex || !hex.startsWith('#')) return hex || 'rgba(0,0,0,0)';
+  let c = hex.substring(1).split('');
+  if (c.length === 3) c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+  c = '0x' + c.join('');
+  return `rgba(${(c>>16)&255}, ${(c>>8)&255}, ${c&255}, ${alpha})`;
+}
+
 const C3D = (() => {
   let data = null;
   let rotX = 0.25, rotY = 0, zoom = 1;
