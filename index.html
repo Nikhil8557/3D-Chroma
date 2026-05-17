@@ -27,8 +27,10 @@
     <span id="v3d-n-tads" style="display:none;"></span>
   </div>
 
-  <!-- 1. DEFINE DEPENDENCIES FIRST -->
   <script>
+    // ==========================================
+    // 1. DEPENDENCIES & HELPERS
+    // ==========================================
     const $ = id => document.getElementById(id);
     const SYNC = { on: ()=>{}, emit: ()=>{}, clear: ()=>{} };
     function hexA(hex, alpha) {
@@ -38,36 +40,258 @@
       c = '0x' + c.join('');
       return `rgba(${(c>>16)&255}, ${(c>>8)&255}, ${c&255}, ${alpha})`;
     }
-  </script>
 
-  <!-- 2. LOAD YOUR C3D SCRIPT SECOND -->
-  <script src="https://cdn.jsdelivr.net/gh/Nikhil8557/3D-Chroma@main/C3D1.js"></script>
+    // ==========================================
+    // 2. THE MAIN 3D ENGINE (C3D)
+    // ==========================================
+    const C3D = (() => {
+      let data = null;
+      let rotX = 0.25, rotY = 0, zoom = 1;
+      let autoAng = 0, autoRot = true;
+      let drag = false, prevMX = 0, prevMY = 0;
+      let showLoops = true, showComp = true;
+      let raf = null, hlB0 = null, hlB1 = null;
+      let eventsInited = false, restoreTimer = null;
+      let _savedAutoRot = true, motionT = 0;
 
-  <!-- 3. GENERATE DATA AND START THIRD -->
-  <script>
-    // --- GENERATE MOCK BIOLOGICAL DATA ---
-    const mockData = {
-      x: [], y: [], z: [], colors: [], ev: [],
-      loops: [], tad_boundaries: [10, 25, 40]
-    };
+      let centroid = { x: 0, y: 0, z: 0 };
+      let splineBackbone = [], splineLoops = [];
+      const canvases = new Set(), pointCache = new WeakMap();
 
-    // Generate a helix/fractal globule-like backbone
+      function catmullRom(t, p0, p1, p2, p3) {
+        const t2 = t * t, t3 = t2 * t;
+        return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+      }
+      function getPt(idx, arr) { return arr[Math.max(0, Math.min(arr.length - 1, idx))]; }
+
+      function build3DGeometry() {
+        if (!data || !data.x.length) return;
+        const { x, y, z, loops } = data;
+        const n = x.length;
+
+        centroid = { x: 0, y: 0, z: 0 };
+        for (let i = 0; i < n; i++) { centroid.x += x[i]; centroid.y += y[i]; centroid.z += z[i]; }
+        centroid.x /= n; centroid.y /= n; centroid.z /= n;
+
+        splineBackbone = [];
+        const steps = 4; 
+        for (let i = 0; i < n - 1; i++) {
+          for (let j = 0; j < steps; j++) {
+            const t = j / steps;
+            splineBackbone.push({
+              x: catmullRom(t, getPt(i-1, x), getPt(i, x), getPt(i+1, x), getPt(i+2, x)),
+              y: catmullRom(t, getPt(i-1, y), getPt(i, y), getPt(i+1, y), getPt(i+2, y)),
+              z: catmullRom(t, getPt(i-1, z), getPt(i, z), getPt(i+1, z), getPt(i+2, z)),
+              bin: i, t: t
+            });
+          }
+        }
+        splineBackbone.push({ x: x[n-1], y: y[n-1], z: z[n-1], bin: n-1, t: 0 });
+
+        splineLoops = [];
+        if (loops && loops.length) {
+          loops.forEach(lp => {
+            const ai = Math.min(lp.a, n - 1), bi = Math.min(lp.b, n - 1);
+            const score = lp.score || 0.5;
+            const A = { x: x[ai], y: y[ai], z: z[ai] }, B = { x: x[bi], y: y[bi], z: z[bi] };
+            const M = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2, z: (A.z + B.z) / 2 };
+
+            const dx = M.x - centroid.x, dy = M.y - centroid.y, dz = M.z - centroid.z;
+            const len = Math.hypot(dx, dy, dz) || 1;
+            const distAB = Math.hypot(A.x - B.x, A.y - B.y, A.z - B.z);
+            
+            const bulge = distAB * (0.25 + score * 0.45); 
+            const CP = { x: M.x + (dx / len) * bulge, y: M.y + (dy / len) * bulge, z: M.z + (dz / len) * bulge };
+
+            const loopSteps = Math.max(8, Math.floor(distAB * 1.5));
+            const lPts = [];
+            for (let j = 0; j <= loopSteps; j++) {
+              const t = j / loopSteps, mt = 1 - t;
+              lPts.push({
+                x: mt * mt * A.x + 2 * mt * t * CP.x + t * t * B.x,
+                y: mt * mt * A.y + 2 * mt * t * CP.y + t * t * B.y,
+                z: mt * mt * A.z + 2 * mt * t * CP.z + t * t * B.z
+              });
+            }
+            splineLoops.push({ lp, lPts, ai, bi, score });
+          });
+        }
+      }
+
+      function load(d) {
+        data = d;
+        if ($('v3d-n-loops')) $('v3d-n-loops').textContent = d.loops?.length ?? 0;
+        if ($('v3d-n-tads')) $('v3d-n-tads').textContent = d.tad_boundaries?.length ?? 0;
+        build3DGeometry();
+        renderNow();
+      }
+
+      function reg(id) {
+        const el = $(id); if (!el || canvases.has(el)) return;
+        canvases.add(el);
+        el.addEventListener('mousedown', e => {
+          drag = true; if (restoreTimer) clearTimeout(restoreTimer);
+          _savedAutoRot = autoRot; autoRot = false; sync3dControls();
+          prevMX = e.clientX; prevMY = e.clientY; e.preventDefault();
+        });
+        el.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.08, Math.min(50, zoom * (e.deltaY < 0 ? 1.15 : .87))); renderNow(); }, { passive: false });
+        if (!eventsInited) {
+          eventsInited = true;
+          window.addEventListener('mousemove', e => {
+            if (!drag) return;
+            rotY += (e.clientX - prevMX) * 0.008; autoAng = rotY;
+            rotX = Math.max(-1.3, Math.min(1.3, rotX + (e.clientY - prevMY) * 0.008));
+            prevMX = e.clientX; prevMY = e.clientY;
+          });
+          window.addEventListener('mouseup', () => {
+            if (!drag) return; drag = false;
+            if (restoreTimer) clearTimeout(restoreTimer);
+            restoreTimer = setTimeout(() => { setAutoRot(_savedAutoRot); }, 1400);
+          });
+        }
+      }
+
+      function proj(px, py, pz) {
+        const cy = Math.cos(rotY), sy = Math.sin(rotY), cx = Math.cos(rotX), sx = Math.sin(rotX);
+        const x1 = px * cy + pz * sy, z1 = -px * sy + pz * cy;
+        const y2 = py * cx - z1 * sx, z2 = py * sx + z1 * cx;
+        const d = 22, f = d / (d + z2 + 10);
+        return { sx: x1 * f, sy: y2 * f, z: z2, f };
+      }
+
+      function drawBackdrop(ctx, W, H, light) {
+        ctx.clearRect(0, 0, W, H);
+        const bg = ctx.createLinearGradient(0, 0, W, H);
+        bg.addColorStop(0, '#060a12'); bg.addColorStop(1, '#02040a');
+        ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+        const glow = ctx.createRadialGradient(W * 0.34, H * 0.28, 0, W * 0.46, H * 0.42, Math.max(W, H) * 0.7);
+        glow.addColorStop(0, 'rgba(36,113,163,.16)'); glow.addColorStop(0.5, 'rgba(231,76,60,.06)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+      }
+
+      function drawOn(canvas) {
+        if (!data || !canvas) return;
+        const W = canvas.offsetWidth, H = canvas.offsetHeight || 380;
+        if (W < 4 || H < 4) return;
+        canvas.width = W; canvas.height = H;
+
+        const ctx = canvas.getContext('2d');
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        drawBackdrop(ctx, W, H, false);
+
+        const { colors, ev } = data;
+        const n = data.x.length;
+        if (!n) return;
+
+        const scale = Math.min(W, H) * 0.031 * zoom;
+        const OCX = W / 2, OCY = H / 2;
+
+        const pts = new Array(n);
+        for (let i = 0; i < n; i++) {
+          const p = proj(data.x[i], data.y[i], data.z[i]);
+          pts[i] = { px: OCX + p.sx * scale, py: OCY + p.sy * scale, z: p.z, f: p.f };
+        }
+
+        const renderList = [];
+        let prevP = null;
+        for (let i = 0; i < splineBackbone.length; i++) {
+          const cur = splineBackbone[i];
+          const p = proj(cur.x, cur.y, cur.z);
+          const currP = { px: OCX + p.sx * scale, py: OCY + p.sy * scale, z: p.z, f: p.f };
+          if (prevP) {
+            const col = showComp ? (ev && ev[cur.bin] > 0.5 ? '#e74c3c' : '#2980b9') : (colors[cur.bin] || '#5dade2');
+            renderList.push({ type: 'backbone', z: (prevP.z + currP.z) * 0.5, p1: prevP, p2: currP, col });
+          }
+          prevP = currP;
+        }
+
+        if (showLoops && splineLoops.length) {
+          splineLoops.forEach(loop => {
+            let prevLp = null;
+            loop.lPts.forEach((pt) => {
+              const p = proj(pt.x, pt.y, pt.z);
+              const currLp = { px: OCX + p.sx * scale, py: OCY + p.sy * scale, z: p.z, f: p.f };
+              if (prevLp) {
+                renderList.push({ type: 'loop', z: (prevLp.z + currLp.z) * 0.5, p1: prevLp, p2: currLp, color: loop.lp.color, alpha: 0.6, score: loop.score });
+              }
+              prevLp = currLp;
+            });
+            [pts[loop.ai], pts[loop.bi]].forEach(p => {
+              if (p) renderList.push({ type: 'anchor', z: p.z - 0.1, p, color: loop.lp.color, score: loop.score });
+            });
+          });
+        }
+
+        renderList.sort((a, b) => a.z - b.z);
+
+        renderList.forEach(item => {
+          if (item.type === 'backbone') {
+            const avgF = (item.p1.f + item.p2.f) * 0.5;
+            ctx.beginPath(); ctx.moveTo(item.p1.px, item.p1.py); ctx.lineTo(item.p2.px, item.p2.py);
+            ctx.strokeStyle = hexA(item.col, 0.25 + avgF * 0.7); ctx.lineWidth = Math.max(0.8, 3.2 * avgF); ctx.stroke();
+          } else if (item.type === 'loop') {
+            const avgF = (item.p1.f + item.p2.f) * 0.5;
+            ctx.beginPath(); ctx.moveTo(item.p1.px, item.p1.py); ctx.lineTo(item.p2.px, item.p2.py);
+            ctx.strokeStyle = hexA(item.color, item.alpha); ctx.lineWidth = Math.max(1, (1.0 + item.score * 3.0) * avgF); ctx.stroke();
+          } else if (item.type === 'anchor') {
+            const r = Math.max(1.5, 3.5 * item.p.f * Math.min(zoom, 2));
+            ctx.beginPath(); ctx.arc(item.p.px, item.p.py, r, 0, Math.PI * 2); 
+            ctx.fillStyle = hexA(item.color, 0.95); ctx.fill();
+          }
+        });
+
+        ctx.fillStyle = 'rgba(255,255,255,.16)'; ctx.font = '9px sans-serif';
+        ctx.fillText(autoRot ? 'drag · scroll zoom' : 'drag · scroll zoom', 7, H - 7);
+      }
+
+      function tick() {
+        motionT += 0.014; if (autoRot && !drag) { autoAng += 0.0026; rotY = autoAng; }
+        canvases.forEach(c => drawOn(c));
+        raf = requestAnimationFrame(tick);
+      }
+      function renderNow() { canvases.forEach(c => drawOn(c)); }
+      function start() { reg('viewer3d'); sync3dControls(); if (!raf) tick(); else renderNow(); }
+
+      function setAutoRot(v) { autoRot = !!v; if (autoRot) autoAng = rotY; _savedAutoRot = autoRot; renderNow(); sync3dControls(); }
+      function setShowLoops(v) { showLoops = !!v; renderNow(); sync3dControls(); }
+      function setShowComp(v) { showComp = !!v; renderNow(); sync3dControls(); }
+
+      return { load, start, reset: () => { rotX=0.25;rotY=0;zoom=1;setAutoRot(true); }, get autoRot() { return autoRot; }, get showLoops() { return showLoops; }, get showComp() { return showComp; }, setAutoRot, setShowLoops, setShowComp };
+    })();
+
+    // ==========================================
+    // 3. UI BINDINGS
+    // ==========================================
+    function updateCtrl(id, on) { const el = $(id); if (el) { el.textContent = on ? 'On' : 'Off'; el.classList.toggle('on', on); } }
+    function sync3dControls() { updateCtrl('ctrl-rot', C3D.autoRot); updateCtrl('ctrl-loops', C3D.showLoops); updateCtrl('ctrl-comp', C3D.showComp); }
+    function bind3dCtrl(id, handler) { const el = $(id); if (el) el.addEventListener('click', e => { e.preventDefault(); handler(); }); }
+
+    bind3dCtrl('ctrl-rot', () => C3D.setAutoRot(!C3D.autoRot));
+    bind3dCtrl('ctrl-loops', () => C3D.setShowLoops(!C3D.showLoops));
+    bind3dCtrl('ctrl-comp', () => C3D.setShowComp(!C3D.showComp));
+    bind3dCtrl('ctrl-reset', () => C3D.reset());
+
+    // ==========================================
+    // 4. GENERATE MOCK DATA & START
+    // ==========================================
+    const mockData = { x: [], y: [], z: [], colors: [], ev: [], loops: [], tad_boundaries: [10, 25, 40] };
+    
+    // Generate an artificial 3D helical structure
     for (let i = 0; i < 50; i++) {
       mockData.x.push(Math.sin(i * 0.4) * 8 + (Math.random()-0.5));
       mockData.y.push(Math.cos(i * 0.4) * 8 + (Math.random()-0.5));
       mockData.z.push(i * 0.8 - 20);
       mockData.colors.push(i % 2 === 0 ? '#5dade2' : '#2ecc71');
-      mockData.ev.push(i > 25 ? 0.8 : 0.2); // Simulating A/B compartments
+      mockData.ev.push(i > 25 ? 0.8 : 0.2); 
     }
 
-    // Generate mock EPI loops with high scores
+    // Mock EPI interaction loops
     mockData.loops = [
       { a: 5, b: 15, score: 0.9, color: '#ff3333' },
       { a: 20, b: 35, score: 0.6, color: '#f39c12' },
       { a: 10, b: 45, score: 0.8, color: '#9b59b6' }
     ];
 
-    // --- LOAD & START ---
     C3D.load(mockData);
     C3D.start();
   </script>
