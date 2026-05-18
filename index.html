@@ -3,432 +3,309 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Advanced 3D Chromatin Viewer</title>
+  <title>3D-Chroma | Advanced Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #1e293b;
-      --accent: #3b82f6;
-      --text: #f8fafc;
-    }
-    body { 
-      background: var(--bg); 
-      color: var(--text); 
-      font-family: 'Inter', system-ui, sans-serif; 
-      margin: 0;
-      display: flex; 
-      flex-direction: column; 
-      align-items: center; 
-      justify-content: center;
-      min-height: 100vh;
-      overflow: hidden;
-    }
-
-    .container {
-      position: relative;
-      width: 90vw;
-      max-width: 800px;
-      aspect-ratio: 1/1;
-      background: #000;
-      border-radius: 16px;
-      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
-      border: 1px solid rgba(255,255,255,0.1);
-      overflow: hidden;
-    }
-
-    canvas { width: 100%; height: 100%; cursor: grab; display: block; }
+    :root { --bg: #020617; }
+    body { background-color: var(--bg); color: #f8fafc; overflow: hidden; }
+    canvas { cursor: grab; touch-action: none; }
     canvas:active { cursor: grabbing; }
-
-    .ui-overlay {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      pointer-events: none;
+    .glass {
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
-    .stats {
-      background: rgba(15, 23, 42, 0.6);
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 12px;
-      backdrop-filter: blur(4px);
-      border: 1px solid rgba(255,255,255,0.1);
-    }
-
-    .controls { 
-      margin-top: 20px; 
-      display: flex; 
-      gap: 10px; 
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-
-    button { 
-      padding: 10px 16px; 
-      cursor: pointer; 
-      background: var(--panel); 
-      color: white; 
-      border: 1px solid rgba(255,255,255,0.1); 
-      border-radius: 8px; 
-      font-size: 13px;
-      font-weight: 500;
+    .btn-toggle {
       transition: all 0.2s;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      background: #1e293b;
+      border: 1px solid #334155;
     }
-    button:hover { background: #334155; transform: translateY(-1px); }
-    button.active { background: var(--accent); border-color: var(--accent); }
-    
-    #loading-screen {
-      position: absolute;
-      inset: 0;
-      background: var(--bg);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 50;
+    .btn-toggle.active {
+      background: #3b82f6;
+      border-color: #60a5fa;
+      box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
     }
-
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(255,255,255,0.1);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-bottom: 15px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
-<body>
+<body class="h-screen flex flex-col items-center justify-center">
 
-  <div class="container" id="viewer-container">
-    <div id="loading-screen">
-      <div class="spinner"></div>
-      <p>Folding Chromatin...</p>
+  <!-- Header Info -->
+  <div class="absolute top-6 left-6 z-10 glass p-4 rounded-xl pointer-events-none">
+    <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
+      3D Chromatin Engine
+    </h1>
+    <p class="text-xs text-slate-400 mt-1 uppercase tracking-widest" id="data-status">Initializing...</p>
+    <div class="mt-3 flex gap-4 text-xs font-mono">
+      <div>Nodes: <span id="stat-nodes" class="text-blue-400">0</span></div>
+      <div>Loops: <span id="stat-loops" class="text-red-400">0</span></div>
     </div>
-    
-    <div class="ui-overlay">
-      <div class="stats">
-        <div>Nodes: <span id="stat-nodes">0</span></div>
-        <div>Loops: <span id="stat-loops">0</span></div>
-      </div>
-    </div>
-    
-    <canvas id="viewer3d"></canvas>
   </div>
-  
-  <div class="controls">
-    <button id="ctrl-rot" class="active">Rotate</button>
-    <button id="ctrl-loops" class="active">EPI Loops</button>
-    <button id="ctrl-comp" class="active">Compartments</button>
-    <button id="ctrl-reset">Reset View</button>
+
+  <!-- Main Canvas Container -->
+  <div id="wrapper" class="relative w-[95vw] h-[80vh] max-w-5xl rounded-2xl overflow-hidden shadow-2xl border border-white/5 bg-black">
+    <canvas id="viewer3d" class="w-full h-full"></canvas>
+    
+    <!-- Interaction Help -->
+    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-white/30 uppercase tracking-[0.2em] pointer-events-none">
+      Orbit: Drag · Zoom: Scroll · Pan: Shift+Drag
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="flex gap-3 mt-6 z-10">
+    <button id="btn-rot" class="btn-toggle active px-4 py-2 rounded-lg text-sm font-medium">Auto-Orbit</button>
+    <button id="btn-loops" class="btn-toggle active px-4 py-2 rounded-lg text-sm font-medium">Loops</button>
+    <button id="btn-comp" class="btn-toggle active px-4 py-2 rounded-lg text-sm font-medium">Compartments</button>
+    <button id="btn-reset" class="btn-toggle px-4 py-2 rounded-lg text-sm font-medium">Reset View</button>
   </div>
 
   <script>
     /**
-     * UTILITIES & COLORS
+     * CHROMA 3D ENGINE
+     * Optimized for Hi-C spatial data visualization
      */
-    const $ = id => document.getElementById(id);
-    
-    const parseColor = (hex, alpha) => {
-      if (!hex.startsWith('#')) return hex;
-      const r = parseInt(hex.slice(1, 3), 16);
-      const g = parseInt(hex.slice(3, 5), 16);
-      const b = parseInt(hex.slice(5, 7), 16);
-      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-    };
+    class ChromaViewer {
+      constructor(canvasId) {
+        this.canvas = document.getElementById(canvasId);
+        this.ctx = this.canvas.getContext('2d', { alpha: false });
+        this.data = null;
+        
+        // Camera State
+        this.camera = {
+          rotX: 0.3, rotY: 0, zoom: 1,
+          targetRotX: 0.3, targetRotY: 0,
+          offX: 0, offY: 0,
+          inertia: 0.08
+        };
 
-    /**
-     * 3D ENGINE
-     */
-    const C3D = (() => {
-      // State
-      let state = {
-        data: null,
-        rotX: 0.25, rotY: 0, zoom: 1,
-        autoAng: 0, autoRot: true,
-        drag: false, prevMX: 0, prevMY: 0,
-        showLoops: true, showComp: true,
-        motionT: 0,
-        hlBin: null
-      };
+        // Animation State
+        this.state = {
+          autoRot: true,
+          showLoops: true,
+          showComp: true,
+          time: 0,
+          drag: false,
+          lastM: { x: 0, y: 0 }
+        };
 
-      // Geometry Cache
-      let cache = {
-        centroid: { x: 0, y: 0, z: 0 },
-        backbone: [],
-        loops: []
-      };
-
-      const canvas = $('viewer3d');
-      const ctx = canvas.getContext('2d', { alpha: false });
-
-      // Catmull-Rom for smooth backbone
-      function solveSpline(t, p0, p1, p2, p3) {
-        return 0.5 * (
-          (2 * p1) + (-p0 + p2) * t +
-          (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
-          (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t
-        );
+        this.cache = { backbone: [], loops: [] };
+        this.initListeners();
+        this.resize();
       }
 
-      function buildGeometry() {
-        if (!state.data) return;
-        const { x, y, z, loops } = state.data;
-        const n = x.length;
+      resize() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = this.canvas.parentElement.getBoundingClientRect();
+        this.canvas.width = rect.width * dpr;
+        this.canvas.height = rect.height * dpr;
+        this.ctx.scale(dpr, dpr);
+      }
 
-        // 1. Centroid
-        cache.centroid = { 
+      load(data) {
+        this.data = data;
+        this.preprocess();
+        document.getElementById('data-status').textContent = "Structure Loaded";
+        document.getElementById('stat-nodes').textContent = data.x.length;
+        document.getElementById('stat-loops').textContent = data.loops?.length || 0;
+      }
+
+      preprocess() {
+        const { x, y, z, loops } = this.data;
+        const n = x.length;
+        
+        // 1. Centering
+        const mid = { 
           x: x.reduce((a,b)=>a+b,0)/n, 
           y: y.reduce((a,b)=>a+b,0)/n, 
           z: z.reduce((a,b)=>a+b,0)/n 
         };
 
-        // 2. Backbone
-        cache.backbone = [];
-        const steps = 4;
-        for (let i = 0; i < n - 1; i++) {
-          const get = (idx, arr) => arr[Math.max(0, Math.min(n - 1, idx))];
-          for (let j = 0; j < steps; j++) {
-            const t = j / steps;
-            cache.backbone.push({
-              x: solveSpline(t, get(i-1, x), get(i, x), get(i+1, x), get(i+2, x)),
-              y: solveSpline(t, get(i-1, y), get(i, y), get(i+1, y), get(i+2, y)),
-              z: solveSpline(t, get(i-1, z), get(i, z), get(i+1, z), get(i+2, z)),
-              bin: i
-            });
-          }
+        // 2. Backbone with biological smoothing
+        this.cache.backbone = [];
+        for(let i=0; i<n; i++) {
+          this.cache.backbone.push({
+            x: x[i] - mid.x, y: y[i] - mid.y, z: z[i] - mid.z,
+            bin: i, ev: this.data.ev?.[i] || 0
+          });
         }
 
-        // 3. Loops
-        cache.loops = (loops || []).map(lp => {
-          const A = { x: x[lp.a], y: y[lp.a], z: z[lp.a] };
-          const B = { x: x[lp.b], y: y[lp.b], z: z[lp.b] };
-          const dist = Math.hypot(A.x-B.x, A.y-B.y, A.z-B.z);
+        // 3. Pre-calculate loop arcs
+        this.cache.loops = (loops || []).map(lp => {
+          const pA = this.cache.backbone[lp.a];
+          const pB = this.cache.backbone[lp.b];
+          const dist = Math.hypot(pA.x-pB.x, pA.y-pB.y, pA.z-pB.z);
           
-          // Project control point outwards from centroid
-          const mid = { x: (A.x+B.x)/2, y: (A.y+B.y)/2, z: (A.z+B.z)/2 };
-          const dir = { x: mid.x - cache.centroid.x, y: mid.y - cache.centroid.y, z: mid.z - cache.centroid.z };
-          const dirL = Math.hypot(dir.x, dir.y, dir.z) || 1;
-          const bulge = dist * 0.6;
-          const cp = { x: mid.x + (dir.x/dirL)*bulge, y: mid.y + (dir.y/dirL)*bulge, z: mid.z + (dir.z/dirL)*bulge };
-
-          const pts = [];
-          for(let i=0; i<=10; i++) {
-            const t = i/10, mt = 1-t;
-            pts.push({
-              x: mt*mt*A.x + 2*mt*t*cp.x + t*t*B.x,
-              y: mt*mt*A.y + 2*mt*t*cp.y + t*t*B.y,
-              z: mt*mt*A.z + 2*mt*t*cp.z + t*t*B.z
+          // Generate arc points
+          const arc = [];
+          const segments = 12;
+          for(let i=0; i<=segments; i++) {
+            const t = i/segments;
+            const mt = 1-t;
+            // Quadratic bezier bulge
+            const h = dist * 0.5;
+            arc.push({
+              x: mt*pA.x + t*pB.x,
+              y: mt*pA.y + t*pB.y - (Math.sin(t*Math.PI) * h), // Lift arc upwards
+              z: mt*pA.z + t*pB.z,
             });
           }
-          return { pts, color: lp.color || '#f87171', score: lp.score || 0.5 };
+          return { arc, color: lp.color || '#ef4444', score: lp.score || 0.5 };
         });
-
-        $('stat-nodes').textContent = n;
-        $('stat-loops').textContent = loops?.length || 0;
       }
 
-      function project(x, y, z) {
-        const cx = Math.cos(state.rotX), sx = Math.sin(state.rotX);
-        const cy = Math.cos(state.rotY), sy = Math.sin(state.rotY);
+      project(p) {
+        // Rotate
+        const cx = Math.cos(this.camera.rotX), sx = Math.sin(this.camera.rotX);
+        const cy = Math.cos(this.camera.rotY), sy = Math.sin(this.camera.rotY);
         
-        // Rotate Y
-        let x1 = x * cy + z * sy;
-        let z1 = -x * sy + z * cy;
-        // Rotate X
-        let y2 = y * cx - z1 * sx;
-        let z2 = y * sx + z1 * cx;
-        
-        const perspective = 25 / (25 + z2 + 10);
+        let x = p.x * cy + p.z * sy;
+        let z = -p.x * sy + p.z * cy;
+        let y = p.y * cx - z * sx;
+        z = p.y * sx + z * cx;
+
+        const depth = 1 / (1 + (z + 50) / 500); // Simple perspective
         return {
-          sx: x1 * perspective,
-          sy: y2 * perspective,
-          z: z2,
-          f: perspective
+          x: (x * depth * this.camera.zoom * 20) + (this.canvas.width / (2 * window.devicePixelRatio)) + this.camera.offX,
+          y: (y * depth * this.camera.zoom * 20) + (this.canvas.height / (2 * window.devicePixelRatio)) + this.camera.offY,
+          z: z,
+          depth: depth
         };
       }
 
-      function draw() {
-        if (!state.data) return;
-        const W = canvas.width, H = canvas.height;
-        const centerX = W / 2, centerY = H / 2;
-        const scale = Math.min(W, H) * 0.03 * state.zoom;
+      draw() {
+        if (!this.data) return;
+        const ctx = this.ctx;
+        const W = this.canvas.width / window.devicePixelRatio;
+        const H = this.canvas.height / window.devicePixelRatio;
 
-        // Background
-        ctx.fillStyle = '#0f172a';
+        // Clean slate
+        ctx.fillStyle = '#020617';
         ctx.fillRect(0, 0, W, H);
 
-        // Nebula Glow
-        const grd = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, W * 0.6);
-        grd.addColorStop(0, 'rgba(30, 58, 138, 0.2)');
-        grd.addColorStop(1, 'rgba(15, 23, 42, 0)');
-        ctx.fillStyle = grd;
-        ctx.fillRect(0, 0, W, H);
+        // Smooth Camera
+        if (this.state.autoRot && !this.state.drag) this.camera.targetRotY += 0.005;
+        this.camera.rotX += (this.camera.targetRotX - this.camera.rotX) * this.camera.inertia;
+        this.camera.rotY += (this.camera.targetRotY - this.camera.rotY) * this.camera.inertia;
 
         const renderList = [];
 
-        // Add Backbone to render list
-        let prev = null;
-        cache.backbone.forEach((pt, i) => {
-          const p = project(pt.x, pt.y, pt.z);
-          const current = { px: centerX + p.sx * scale, py: centerY + p.sy * scale, z: p.z, f: p.f };
-          if (prev) {
-            const isHL = state.hlBin === pt.bin;
-            const col = state.showComp ? (state.data.ev[pt.bin] > 0.5 ? '#f87171' : '#60a5fa') : '#94a3b8';
-            renderList.push({
-              type: 'line',
-              z: (prev.z + current.z)/2,
-              p1: prev, p2: current,
-              col, width: (isHL ? 6 : 2.5) * current.f,
-              alpha: isHL ? 1 : 0.3 + current.f * 0.6
-            });
-          }
-          prev = current;
-        });
+        // Add backbone segments to render list
+        for (let i = 0; i < this.cache.backbone.length - 1; i++) {
+          const p1 = this.project(this.cache.backbone[i]);
+          const p2 = this.project(this.cache.backbone[i+1]);
+          const isA = this.cache.backbone[i].ev > 0;
+          
+          renderList.push({
+            type: 'path',
+            z: (p1.z + p2.z) / 2,
+            draw: () => {
+              ctx.beginPath();
+              ctx.moveTo(p1.x, p1.y);
+              ctx.lineTo(p2.x, p2.y);
+              ctx.strokeStyle = this.state.showComp 
+                ? (isA ? `rgba(96, 165, 250, ${0.2 + p1.depth})` : `rgba(248, 113, 113, ${0.2 + p1.depth})`)
+                : `rgba(148, 163, 184, ${0.1 + p1.depth})`;
+              ctx.lineWidth = 2 * p1.depth;
+              ctx.stroke();
+            }
+          });
+        }
 
-        // Add Loops
-        if (state.showLoops) {
-          cache.loops.forEach(lp => {
-            let lpPrev = null;
-            lp.pts.forEach(pt => {
-              const p = project(pt.x, pt.y, pt.z);
-              const curr = { px: centerX + p.sx * scale, py: centerY + p.sy * scale, z: p.z, f: p.f };
-              if (lpPrev) {
-                renderList.push({
-                  type: 'line',
-                  z: (lpPrev.z + curr.z)/2,
-                  p1: lpPrev, p2: curr,
-                  col: lp.color, width: 1.5 * curr.f,
-                  alpha: 0.4 + (Math.sin(state.motionT * 3) * 0.1)
-                });
+        // Add loops
+        if (this.state.showLoops) {
+          this.cache.loops.forEach(loop => {
+            const pts = loop.arc.map(p => this.project(p));
+            renderList.push({
+              type: 'loop',
+              z: pts.reduce((a,b) => a + b.z, 0) / pts.length,
+              draw: () => {
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for(let i=1; i<pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+                ctx.strokeStyle = loop.color;
+                ctx.globalAlpha = 0.3 * pts[0].depth;
+                ctx.lineWidth = 1.5 * pts[0].depth;
+                ctx.stroke();
+                ctx.globalAlpha = 1.0;
               }
-              lpPrev = curr;
             });
           });
         }
 
-        // Depth sort
-        renderList.sort((a, b) => a.z - b.z);
+        // Sort by Z (Depth Buffer)
+        renderList.sort((a, b) => b.z - a.z);
+        renderList.forEach(item => item.draw());
 
-        // Final Draw
-        renderList.forEach(item => {
-          ctx.beginPath();
-          ctx.strokeStyle = parseColor(item.col, item.alpha);
-          ctx.lineWidth = item.width;
-          ctx.lineCap = 'round';
-          ctx.moveTo(item.p1.px, item.p1.py);
-          ctx.lineTo(item.p2.px, item.p2.py);
-          ctx.stroke();
-        });
-
-        // HUD
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.font = '10px monospace';
-        ctx.fillText(state.autoRot ? "AUTO-ORBIT ACTIVE" : "MANUAL CONTROL", 20, H - 20);
+        this.state.time += 0.01;
+        requestAnimationFrame(() => this.draw());
       }
 
-      function loop() {
-        state.motionT += 0.01;
-        if (state.autoRot && !state.drag) {
-          state.autoAng += 0.005;
-          state.rotY = state.autoAng;
-        }
-        draw();
-        requestAnimationFrame(loop);
-      }
+      initListeners() {
+        window.addEventListener('resize', () => this.resize());
 
-      // Interaction
-      function initInteraction() {
-        const handleResize = () => {
-          const rect = canvas.getBoundingClientRect();
-          canvas.width = rect.width * window.devicePixelRatio;
-          canvas.height = rect.height * window.devicePixelRatio;
-          ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-        };
-        window.addEventListener('resize', handleResize);
-        handleResize();
-
-        canvas.addEventListener('mousedown', e => {
-          state.drag = true;
-          state.prevMX = e.clientX;
-          state.prevMY = e.clientY;
+        this.canvas.addEventListener('mousedown', e => {
+          this.state.drag = true;
+          this.state.lastM = { x: e.clientX, y: e.clientY };
         });
 
         window.addEventListener('mousemove', e => {
-          if (!state.drag) return;
-          const dx = e.clientX - state.prevMX;
-          const dy = e.clientY - state.prevMY;
-          state.rotY += dx * 0.01;
-          state.rotX += dy * 0.01;
-          state.autoAng = state.rotY;
-          state.prevMX = e.clientX;
-          state.prevMY = e.clientY;
+          if (!this.state.drag) return;
+          const dx = e.clientX - this.state.lastM.x;
+          const dy = e.clientY - this.state.lastM.y;
+          
+          if (e.shiftKey) {
+            this.camera.offX += dx;
+            this.camera.offY += dy;
+          } else {
+            this.camera.targetRotY += dx * 0.01;
+            this.camera.targetRotX += dy * 0.01;
+          }
+          this.state.lastM = { x: e.clientX, y: e.clientY };
         });
 
-        window.addEventListener('mouseup', () => state.drag = false);
-        
-        canvas.addEventListener('wheel', e => {
+        window.addEventListener('mouseup', () => this.state.drag = false);
+
+        this.canvas.addEventListener('wheel', e => {
           e.preventDefault();
-          state.zoom *= (e.deltaY < 0 ? 1.1 : 0.9);
-          state.zoom = Math.min(Math.max(state.zoom, 0.1), 10);
+          this.camera.zoom *= (e.deltaY < 0 ? 1.1 : 0.9);
         }, { passive: false });
       }
-
-      return {
-        init: (data) => {
-          state.data = data;
-          buildGeometry();
-          initInteraction();
-          $('loading-screen').style.display = 'none';
-          loop();
-        },
-        toggleRot: () => { state.autoRot = !state.autoRot; return state.autoRot; },
-        toggleLoops: () => { state.showLoops = !state.showLoops; return state.showLoops; },
-        toggleComp: () => { state.showComp = !state.showComp; return state.showComp; },
-        reset: () => { state.rotX = 0.25; state.rotY = 0; state.zoom = 1; state.autoAng = 0; }
-      };
-    })();
-
-    /**
-     * DATA LOADING & FALLBACK
-     */
-    function generateMockData() {
-      const n = 100;
-      const x = [], y = [], z = [], ev = [];
-      let tx = 0, ty = 0, tz = 0;
-      for(let i=0; i<n; i++) {
-        tx += (Math.random()-0.5) * 10;
-        ty += (Math.random()-0.5) * 10;
-        tz += (Math.random()-0.5) * 10;
-        x.push(tx); y.push(ty); z.push(tz);
-        ev.push(Math.random());
-      }
-      const loops = [
-        {a: 10, b: 40, color: '#f87171', score: 0.8},
-        {a: 50, b: 85, color: '#fbbf24', score: 0.6}
-      ];
-      return { x, y, z, ev, loops };
     }
 
-    // Initialize UI
-    $('ctrl-rot').onclick = (e) => e.target.classList.toggle('active', C3D.toggleRot());
-    $('ctrl-loops').onclick = (e) => e.target.classList.toggle('active', C3D.toggleLoops());
-    $('ctrl-comp').onclick = (e) => e.target.classList.toggle('active', C3D.toggleComp());
-    $('ctrl-reset').onclick = () => C3D.reset();
+    // Initialize
+    const viewer = new ChromaViewer('viewer3d');
 
-    // Start
-    fetch('./chromatin_data.json')
+    // Controls Logic
+    const toggleBtn = (id, callback) => {
+      const btn = document.getElementById(id);
+      btn.onclick = () => {
+        const state = callback();
+        btn.classList.toggle('active', state);
+      };
+    };
+
+    toggleBtn('btn-rot', () => viewer.state.autoRot = !viewer.state.autoRot);
+    toggleBtn('btn-loops', () => viewer.state.showLoops = !viewer.state.showLoops);
+    toggleBtn('btn-comp', () => viewer.state.showComp = !viewer.state.showComp);
+    document.getElementById('btn-reset').onclick = () => {
+      viewer.camera.targetRotX = 0.3;
+      viewer.camera.targetRotY = 0;
+      viewer.camera.zoom = 1;
+      viewer.camera.offX = 0;
+      viewer.camera.offY = 0;
+    };
+
+    // Load Data
+    fetch('https://raw.githubusercontent.com/Nikhil8557/3D-Chroma/main/chromatin_data.json')
       .then(r => r.json())
-      .then(data => C3D.init(data))
+      .then(data => {
+        viewer.load(data);
+        viewer.draw();
+      })
       .catch(err => {
-        console.warn("Using generated mock data (JSON not found)");
-        C3D.init(generateMockData());
+        console.error("Data fail:", err);
+        document.getElementById('data-status').textContent = "Error Loading Data";
       });
-
   </script>
 </body>
 </html>
