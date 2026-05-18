@@ -1,174 +1,137 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D-Chroma | Advanced Viewer</title>
+  <title>3D-Chroma | Fiber Engine</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    :root { --bg: #020617; }
-    body { background-color: var(--bg); color: #f8fafc; overflow: hidden; }
+    body { background-color: #020617; color: #f8fafc; overflow: hidden; font-family: 'Inter', sans-serif; }
     canvas { cursor: grab; touch-action: none; }
     canvas:active { cursor: grabbing; }
-    .glass {
-      background: rgba(15, 23, 42, 0.8);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    .btn-toggle {
-      transition: all 0.2s;
-      background: #1e293b;
-      border: 1px solid #334155;
-    }
-    .btn-toggle.active {
-      background: #3b82f6;
-      border-color: #60a5fa;
-      box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
-    }
+    .glass { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    .btn-ui { transition: all 0.2s; background: #1e293b; border: 1px solid #334155; }
+    .btn-ui.active { background: #3b82f6; border-color: #60a5fa; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
   </style>
 </head>
 <body class="h-screen flex flex-col items-center justify-center">
 
-  <!-- Header Info -->
-  <div class="absolute top-6 left-6 z-10 glass p-4 rounded-xl pointer-events-none">
-    <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
-      3D Chromatin Engine
-    </h1>
-    <p class="text-xs text-slate-400 mt-1 uppercase tracking-widest" id="data-status">Initializing...</p>
-    <div class="mt-3 flex gap-4 text-xs font-mono">
-      <div>Nodes: <span id="stat-nodes" class="text-blue-400">0</span></div>
-      <div>Loops: <span id="stat-loops" class="text-red-400">0</span></div>
+  <div class="absolute top-6 left-6 z-10 glass p-5 rounded-2xl pointer-events-none">
+    <h1 class="text-xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">3D Chromatin Fiber</h1>
+    <div class="mt-4 flex gap-6 text-[10px] uppercase tracking-widest font-bold text-slate-500">
+      <div>Bins: <span id="stat-nodes" class="text-cyan-400">0</span></div>
+      <div>TADs: <span id="stat-tads" class="text-purple-400">0</span></div>
+      <div>Loops: <span id="stat-loops" class="text-rose-400">0</span></div>
     </div>
   </div>
 
-  <!-- Main Canvas Container -->
-  <div id="wrapper" class="relative w-[95vw] h-[80vh] max-w-5xl rounded-2xl overflow-hidden shadow-2xl border border-white/5 bg-black">
-    <canvas id="viewer3d" class="w-full h-full"></canvas>
+  <div id="wrapper" class="relative w-[98vw] h-[85vh] rounded-3xl overflow-hidden shadow-2xl bg-[#010409]">
+    <canvas id="viewer3d"></canvas>
     
-    <!-- Interaction Help -->
-    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-white/30 uppercase tracking-[0.2em] pointer-events-none">
-      Orbit: Drag · Zoom: Scroll · Pan: Shift+Drag
+    <div id="loading" class="absolute inset-0 flex items-center justify-center bg-slate-950 z-20">
+      <div class="text-center">
+        <div class="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <p class="mt-4 text-xs tracking-widest text-slate-400">COMPUTING SPLINES...</p>
+      </div>
     </div>
   </div>
 
-  <!-- Controls -->
   <div class="flex gap-3 mt-6 z-10">
-    <button id="btn-rot" class="btn-toggle active px-4 py-2 rounded-lg text-sm font-medium">Auto-Orbit</button>
-    <button id="btn-loops" class="btn-toggle active px-4 py-2 rounded-lg text-sm font-medium">Loops</button>
-    <button id="btn-comp" class="btn-toggle active px-4 py-2 rounded-lg text-sm font-medium">Compartments</button>
-    <button id="btn-reset" class="btn-toggle px-4 py-2 rounded-lg text-sm font-medium">Reset View</button>
+    <button id="btn-rot" class="btn-ui active px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-tighter">Auto-Orbit</button>
+    <button id="btn-beads" class="btn-ui active px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-tighter">Nucleosomes</button>
+    <button id="btn-loops" class="btn-ui active px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-tighter">EPI Loops</button>
+    <button id="btn-reset" class="btn-ui px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-tighter">Reset</button>
   </div>
 
   <script>
-    /**
-     * CHROMA 3D ENGINE
-     * Optimized for Hi-C spatial data visualization
-     */
-    class ChromaViewer {
+    class ChromaFiberEngine {
       constructor(canvasId) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d', { alpha: false });
         this.data = null;
+        this.camera = { rotX: 0.4, rotY: 0, zoom: 1.2, tRotX: 0.4, tRotY: 0, offX: 0, offY: 0 };
+        this.settings = { autoRot: true, showLoops: true, showBeads: true, showComp: true };
+        this.cache = { spline: [], loops: [], beads: [], tadColors: [] };
         
-        // Camera State
-        this.camera = {
-          rotX: 0.3, rotY: 0, zoom: 1,
-          targetRotX: 0.3, targetRotY: 0,
-          offX: 0, offY: 0,
-          inertia: 0.08
-        };
-
-        // Animation State
-        this.state = {
-          autoRot: true,
-          showLoops: true,
-          showComp: true,
-          time: 0,
-          drag: false,
-          lastM: { x: 0, y: 0 }
-        };
-
-        this.cache = { backbone: [], loops: [] };
         this.initListeners();
         this.resize();
       }
 
       resize() {
         const dpr = window.devicePixelRatio || 1;
-        const rect = this.canvas.parentElement.getBoundingClientRect();
-        this.canvas.width = rect.width * dpr;
-        this.canvas.height = rect.height * dpr;
+        this.canvas.width = this.canvas.parentElement.clientWidth * dpr;
+        this.canvas.height = this.canvas.parentElement.clientHeight * dpr;
         this.ctx.scale(dpr, dpr);
       }
 
-      load(data) {
-        this.data = data;
-        this.preprocess();
-        document.getElementById('data-status').textContent = "Structure Loaded";
-        document.getElementById('stat-nodes').textContent = data.x.length;
-        document.getElementById('stat-loops').textContent = data.loops?.length || 0;
+      // Catmull-Rom Spline Math
+      solveSpline(t, p0, p1, p2, p3) {
+        return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
       }
 
-      preprocess() {
-        const { x, y, z, loops } = this.data;
+      preprocess(data) {
+        this.data = data;
+        const { x, y, z, loops, tad_boundaries } = data;
         const n = x.length;
-        
+
         // 1. Centering
-        const mid = { 
-          x: x.reduce((a,b)=>a+b,0)/n, 
-          y: y.reduce((a,b)=>a+b,0)/n, 
-          z: z.reduce((a,b)=>a+b,0)/n 
-        };
+        const avg = { x: x.reduce((a,b)=>a+b,0)/n, y: y.reduce((a,b)=>a+b,0)/n, z: z.reduce((a,b)=>a+b,0)/n };
+        const pts = x.map((_, i) => ({ x: x[i]-avg.x, y: y[i]-avg.y, z: z[i]-avg.z }));
 
-        // 2. Backbone with biological smoothing
-        this.cache.backbone = [];
-        for(let i=0; i<n; i++) {
-          this.cache.backbone.push({
-            x: x[i] - mid.x, y: y[i] - mid.y, z: z[i] - mid.z,
-            bin: i, ev: this.data.ev?.[i] || 0
-          });
-        }
+        // 2. TAD Coloring
+        this.cache.tadColors = pts.map((_, i) => {
+          if (!tad_boundaries) return '#3b82f6';
+          const tadIdx = tad_boundaries.findIndex(b => b > i);
+          return `hsl(${(tadIdx * 137) % 360}, 70%, 60%)`;
+        });
 
-        // 3. Pre-calculate loop arcs
-        this.cache.loops = (loops || []).map(lp => {
-          const pA = this.cache.backbone[lp.a];
-          const pB = this.cache.backbone[lp.b];
-          const dist = Math.hypot(pA.x-pB.x, pA.y-pB.y, pA.z-pB.z);
+        // 3. Cached Spline (Interpolate 6 steps per bin)
+        this.cache.spline = [];
+        const steps = 6;
+        for (let i = 0; i < n - 1; i++) {
+          const get = (idx) => pts[Math.max(0, Math.min(n - 1, idx))];
+          const p0 = get(i-1), p1 = get(i), p2 = get(i+1), p3 = get(i+2);
           
-          // Generate arc points
-          const arc = [];
-          const segments = 12;
-          for(let i=0; i<=segments; i++) {
-            const t = i/segments;
-            const mt = 1-t;
-            // Quadratic bezier bulge
-            const h = dist * 0.5;
-            arc.push({
-              x: mt*pA.x + t*pB.x,
-              y: mt*pA.y + t*pB.y - (Math.sin(t*Math.PI) * h), // Lift arc upwards
-              z: mt*pA.z + t*pB.z,
+          for (let j = 0; j < steps; j++) {
+            const t = j / steps;
+            this.cache.spline.push({
+              x: this.solveSpline(t, p0.x, p1.x, p2.x, p3.x),
+              y: this.solveSpline(t, p0.y, p1.y, p2.y, p3.y),
+              z: this.solveSpline(t, p0.z, p1.z, p2.z, p3.z),
+              color: this.cache.tadColors[i]
             });
           }
-          return { arc, color: lp.color || '#ef4444', score: lp.score || 0.5 };
+        }
+
+        // 4. Nucleosome Beads
+        this.cache.beads = pts.map((p, i) => ({ ...p, color: this.cache.tadColors[i] }));
+
+        // 5. Arcs
+        this.cache.loops = (loops || []).map(lp => {
+          const pA = pts[lp.a], pB = pts[lp.b];
+          const dist = Math.hypot(pA.x-pB.x, pA.y-pB.y, pA.z-pB.z);
+          const mid = { x:(pA.x+pB.x)/2, y:(pA.y+pB.y)/2 - dist*0.6, z:(pA.z+pB.z)/2 };
+          return { pA, pB, mid, color: lp.color || '#f43f5e' };
         });
+
+        document.getElementById('stat-nodes').textContent = n;
+        document.getElementById('stat-tads').textContent = tad_boundaries?.length || 0;
+        document.getElementById('stat-loops').textContent = loops?.length || 0;
+        document.getElementById('loading').style.display = 'none';
       }
 
       project(p) {
-        // Rotate
         const cx = Math.cos(this.camera.rotX), sx = Math.sin(this.camera.rotX);
         const cy = Math.cos(this.camera.rotY), sy = Math.sin(this.camera.rotY);
-        
         let x = p.x * cy + p.z * sy;
         let z = -p.x * sy + p.z * cy;
         let y = p.y * cx - z * sx;
         z = p.y * sx + z * cx;
-
-        const depth = 1 / (1 + (z + 50) / 500); // Simple perspective
+        const f = 600 / (600 + z + 100);
         return {
-          x: (x * depth * this.camera.zoom * 20) + (this.canvas.width / (2 * window.devicePixelRatio)) + this.camera.offX,
-          y: (y * depth * this.camera.zoom * 20) + (this.canvas.height / (2 * window.devicePixelRatio)) + this.camera.offY,
-          z: z,
-          depth: depth
+          x: (x * f * this.camera.zoom) + (this.canvas.width/2/window.devicePixelRatio) + this.camera.offX,
+          y: (y * f * this.camera.zoom) + (this.canvas.height/2/window.devicePixelRatio) + this.camera.offY,
+          z: z, f: f
         };
       }
 
@@ -178,134 +141,133 @@
         const W = this.canvas.width / window.devicePixelRatio;
         const H = this.canvas.height / window.devicePixelRatio;
 
-        // Clean slate
-        ctx.fillStyle = '#020617';
+        ctx.fillStyle = '#010409';
         ctx.fillRect(0, 0, W, H);
 
-        // Smooth Camera
-        if (this.state.autoRot && !this.state.drag) this.camera.targetRotY += 0.005;
-        this.camera.rotX += (this.camera.targetRotX - this.camera.rotX) * this.camera.inertia;
-        this.camera.rotY += (this.camera.targetRotY - this.camera.rotY) * this.camera.inertia;
+        if (this.settings.autoRot) this.camera.tRotY += 0.003;
+        this.camera.rotX += (this.camera.tRotX - this.camera.rotX) * 0.1;
+        this.camera.rotY += (this.camera.tRotY - this.camera.rotY) * 0.1;
 
         const renderList = [];
 
-        // Add backbone segments to render list
-        for (let i = 0; i < this.cache.backbone.length - 1; i++) {
-          const p1 = this.project(this.cache.backbone[i]);
-          const p2 = this.project(this.cache.backbone[i+1]);
-          const isA = this.cache.backbone[i].ev > 0;
-          
+        // Add Spline Segments
+        for (let i = 0; i < this.cache.spline.length - 1; i++) {
+          const p1 = this.project(this.cache.spline[i]);
+          const p2 = this.project(this.cache.spline[i+1]);
           renderList.push({
-            type: 'path',
-            z: (p1.z + p2.z) / 2,
-            draw: () => {
-              ctx.beginPath();
-              ctx.moveTo(p1.x, p1.y);
-              ctx.lineTo(p2.x, p2.y);
-              ctx.strokeStyle = this.state.showComp 
-                ? (isA ? `rgba(96, 165, 250, ${0.2 + p1.depth})` : `rgba(248, 113, 113, ${0.2 + p1.depth})`)
-                : `rgba(148, 163, 184, ${0.1 + p1.depth})`;
-              ctx.lineWidth = 2 * p1.depth;
-              ctx.stroke();
-            }
+            z: (p1.z + p2.z)/2,
+            render: () => this.drawTube(p1, p2, this.cache.spline[i].color)
           });
         }
 
-        // Add loops
-        if (this.state.showLoops) {
-          this.cache.loops.forEach(loop => {
-            const pts = loop.arc.map(p => this.project(p));
-            renderList.push({
-              type: 'loop',
-              z: pts.reduce((a,b) => a + b.z, 0) / pts.length,
-              draw: () => {
-                ctx.beginPath();
-                ctx.moveTo(pts[0].x, pts[0].y);
-                for(let i=1; i<pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-                ctx.strokeStyle = loop.color;
-                ctx.globalAlpha = 0.3 * pts[0].depth;
-                ctx.lineWidth = 1.5 * pts[0].depth;
-                ctx.stroke();
-                ctx.globalAlpha = 1.0;
-              }
-            });
+        // Add Beads
+        if (this.settings.showBeads) {
+          this.cache.beads.forEach(b => {
+            const p = this.project(b);
+            renderList.push({ z: p.z, render: () => this.drawBead(p, b.color) });
           });
         }
 
-        // Sort by Z (Depth Buffer)
-        renderList.sort((a, b) => b.z - a.z);
-        renderList.forEach(item => item.draw());
+        // Add Loops
+        if (this.settings.showLoops) {
+          this.cache.loops.forEach(lp => {
+            const a = this.project(lp.pA), b = this.project(lp.pB), c = this.project(lp.mid);
+            renderList.push({ z: (a.z+b.z+c.z)/3, render: () => this.drawLoop(a, b, c, lp.color) });
+          });
+        }
 
-        this.state.time += 0.01;
+        renderList.sort((a,b) => b.z - a.z);
+        renderList.forEach(item => item.render());
+
         requestAnimationFrame(() => this.draw());
+      }
+
+      drawTube(p1, p2, color) {
+        const ctx = this.ctx;
+        const fog = Math.max(0.1, (p1.z + 200) / 400); // Depth Fog
+        const w = 4 * p1.f;
+
+        // Pass 1: Outer Glow
+        ctx.beginPath();
+        ctx.lineWidth = w * 2.5;
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.15 * fog;
+        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        // Pass 2: Main Body
+        ctx.globalAlpha = 1.0 * fog;
+        ctx.lineWidth = w;
+        ctx.stroke();
+
+        // Pass 3: Specular Highlight (Simulate 3D fiber)
+        ctx.beginPath();
+        ctx.lineWidth = w * 0.3;
+        ctx.strokeStyle = '#ffffff';
+        ctx.globalAlpha = 0.4 * fog;
+        ctx.moveTo(p1.x - w*0.2, p1.y - w*0.2); 
+        ctx.lineTo(p2.x - w*0.2, p2.y - w*0.2);
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+      }
+
+      drawBead(p, color) {
+        const r = 5 * p.f;
+        const grad = this.ctx.createRadialGradient(p.x - r*0.3, p.y - r*0.3, r*0.1, p.x, p.y, r);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.2, color);
+        grad.addColorStop(1, '#000000');
+        this.ctx.fillStyle = grad;
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, r, 0, Math.PI*2);
+        this.ctx.fill();
+      }
+
+      drawLoop(a, b, c, color) {
+        const ctx = this.ctx;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2 * a.f;
+        ctx.globalAlpha = 0.4;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1.0;
       }
 
       initListeners() {
         window.addEventListener('resize', () => this.resize());
-
-        this.canvas.addEventListener('mousedown', e => {
-          this.state.drag = true;
-          this.state.lastM = { x: e.clientX, y: e.clientY };
-        });
-
+        this.canvas.addEventListener('mousedown', e => { this.drag = true; this.lastM = { x: e.clientX, y: e.clientY }; });
         window.addEventListener('mousemove', e => {
-          if (!this.state.drag) return;
-          const dx = e.clientX - this.state.lastM.x;
-          const dy = e.clientY - this.state.lastM.y;
-          
-          if (e.shiftKey) {
-            this.camera.offX += dx;
-            this.camera.offY += dy;
-          } else {
-            this.camera.targetRotY += dx * 0.01;
-            this.camera.targetRotX += dy * 0.01;
-          }
-          this.state.lastM = { x: e.clientX, y: e.clientY };
+          if (!this.drag) return;
+          const dx = e.clientX - this.lastM.x;
+          const dy = e.clientY - this.lastM.y;
+          this.camera.tRotY += dx * 0.01;
+          this.camera.tRotX += dy * 0.01;
+          this.lastM = { x: e.clientX, y: e.clientY };
         });
-
-        window.addEventListener('mouseup', () => this.state.drag = false);
-
-        this.canvas.addEventListener('wheel', e => {
-          e.preventDefault();
-          this.camera.zoom *= (e.deltaY < 0 ? 1.1 : 0.9);
-        }, { passive: false });
+        window.addEventListener('mouseup', () => this.drag = false);
+        this.canvas.addEventListener('wheel', e => { e.preventDefault(); this.camera.zoom *= (e.deltaY < 0 ? 1.1 : 0.9); }, { passive: false });
       }
     }
 
-    // Initialize
-    const viewer = new ChromaViewer('viewer3d');
+    const engine = new ChromaFiberEngine('viewer3d');
 
-    // Controls Logic
-    const toggleBtn = (id, callback) => {
-      const btn = document.getElementById(id);
-      btn.onclick = () => {
-        const state = callback();
-        btn.classList.toggle('active', state);
-      };
-    };
+    const bind = (id, fn) => {
+      const el = document.getElementById(id);
+      el.onclick = () => { const s = fn(); el.classList.toggle('active', s); };
+    }
 
-    toggleBtn('btn-rot', () => viewer.state.autoRot = !viewer.state.autoRot);
-    toggleBtn('btn-loops', () => viewer.state.showLoops = !viewer.state.showLoops);
-    toggleBtn('btn-comp', () => viewer.state.showComp = !viewer.state.showComp);
-    document.getElementById('btn-reset').onclick = () => {
-      viewer.camera.targetRotX = 0.3;
-      viewer.camera.targetRotY = 0;
-      viewer.camera.zoom = 1;
-      viewer.camera.offX = 0;
-      viewer.camera.offY = 0;
-    };
+    bind('btn-rot', () => engine.settings.autoRot = !engine.settings.autoRot);
+    bind('btn-beads', () => engine.settings.showBeads = !engine.settings.showBeads);
+    bind('btn-loops', () => engine.settings.showLoops = !engine.settings.showLoops);
+    document.getElementById('btn-reset').onclick = () => { engine.camera.tRotX = 0.4; engine.camera.tRotY = 0; engine.camera.zoom = 1.2; };
 
-    // Load Data
     fetch('https://raw.githubusercontent.com/Nikhil8557/3D-Chroma/main/chromatin_data.json')
       .then(r => r.json())
-      .then(data => {
-        viewer.load(data);
-        viewer.draw();
-      })
-      .catch(err => {
-        console.error("Data fail:", err);
-        document.getElementById('data-status').textContent = "Error Loading Data";
-      });
+      .then(data => { engine.preprocess(data); engine.draw(); });
   </script>
 </body>
 </html>
