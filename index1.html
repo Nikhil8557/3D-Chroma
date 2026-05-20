@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>3D Chromatin Fiber</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #f4f1ea; /* Creamy parchment */
+            font-family: 'Playfair Display', 'Georgia', serif; /* Scholarly serif font */
+            color: #3e362e; /* Dark sepia ink */
+        }
+
+        canvas {
+            background: #e9e3d9; /* Slightly darker linen tone */
+            display: block;
+            cursor: grab;
+        }
+
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        .glass {
+            background: rgba(250, 246, 240, 0.75); /* Frosted ivory */
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(196, 180, 155, 0.4); /* Soft beige/gold */
+            box-shadow: 0 4px 20px rgba(92, 83, 70, 0.08); /* Soft brown shadow */
+        }
+
+        .btn-ui {
+            transition: all 0.3s ease;
+            background: #fdfcfa; /* Crisp paper */
+            border: 1px solid #d5cdc4; /* Light taupe */
+            color: #5c5346;
+            font-family: 'Georgia', serif;
+        }
+
+        .btn-ui:hover {
+            background: #eee8de; /* Aged paper */
+        }
+
+        .btn-ui.active {
+            background: #a9b3a4; /* Faded sage green */
+            border-color: #8c9687;
+            color: #2c3029; /* Darker green-gray */
+            box-shadow: 0 0 12px rgba(169, 179, 164, 0.5);
+        }
+
+        #info-popup {
+            display: none;
+            position: absolute;
+            background: rgba(253, 251, 247, 0.95); /* Creamy book page */
+            border: 1px solid #c4b49b; /* Soft gold/tan border */
+            padding: 14px;
+            border-radius: 8px; /* Slightly sharper edges for academia */
+            width: 340px;
+            z-index: 100;
+            color: #3e362e; /* Dark sepia */
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 25px rgba(92, 83, 70, 0.15), 0 0 10px rgba(196, 180, 155, 0.3);
+        }
+
+        #pop-meta table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 6px;
+            font-size: 11px;
+            font-family: 'Courier New', Courier, monospace; /* Old typewriter feel */
+        }
+
+        #pop-meta th {
+            text-align: left;
+            color: #7d7265; /* Muted brown */
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(92, 83, 70, 0.15);
+            font-family: 'Georgia', serif;
+            font-weight: normal;
+            font-style: italic; /* Classic academia touch */
+        }
+
+        #pop-meta td {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(92, 83, 70, 0.08);
+        }
+
+        .pop-table-wrapper {
+            max-height: 180px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .pop-table-wrapper::-webkit-scrollbar {
+            width: 5px;
+        }
+        .pop-table-wrapper::-webkit-scrollbar-thumb {
+            background: #c4b49b; /* Soft gold/brass scrollbar */
+            border-radius: 4px;
+        }
+
+        .meta-block {
+            margin-top: 8px;
+            padding: 8px;
+            border-radius: 6px;
+            background: rgba(92, 83, 70, 0.04);
+            border: 1px solid rgba(92, 83, 70, 0.1);
+            color: #7d7265;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Top Left UI -->
+    <div class="absolute top-6 left-6 z-10 glass p-5 rounded-2xl">
+        <h1 class="text-xl font-bold text-amber-800">Chroma-3D</h1>
+        <div class="mt-4 flex gap-6 text-[10px] uppercase tracking-widest font-bold text-[#a9b3a4]-100">
+            <div>Bins: <span id="stat-nodes" class="text-amber-800">0</span></div>
+            <div>TADs: <span id="stat-tads" class="text-amber-800">0</span></div>
+        </div>
+    </div>
+
+    <!-- Metadata Popup -->
+    <div id="info-popup">
+        <h3 class="text-amber-800 font-bold border-b border-amber-700 pb-1 mb-2">TAD Region</h3>
+        <p class="text-[10px] text-stone-600 uppercase">Genomic Interval</p>
+        <p id="pop-range" class="font-mono text-sm mb-3"></p>
+        
+        <p class="text-[10px] text-stone-600 uppercase">TAD Statistics</p>
+        <div id="pop-stats" class="text-sm mb-3"></div>
+        
+        <p class="text-[10px] text-stone-600 uppercase">Gene Tabula</p>
+        <div id="pop-meta"></div>
+    </div>
+
+    <!-- Canvas Wrapper -->
+    <div id="wrapper" class="relative w-screen h-screen overflow-hidden">
+        <canvas id="viewer3d"></canvas>
+        <div id="loading" class="absolute inset-0 flex items-center justify-center bg-[#a4744e] z-20">
+            <div class="text-center">
+                <div class="inline-block w-8 h-8 border-4 border-[#120f12] border-t-transparent rounded-full animate-spin"></div>
+                <p id="loading-text" class="mt-4 text-xs tracking-widest text-[#120f12]">LOADING CHROMATIN...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Controls -->
+    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-3 z-10">
+        <button id="btn-rot" class="btn-ui active px-5 py-2 rounded-xl text-xs font-bold uppercase">Auto Orbit</button>
+        <button id="btn-beads" class="btn-ui active px-5 py-2 rounded-xl text-xs font-bold uppercase">Bins</button>
+        <button id="btn-render" class="btn-ui px-5 py-2 rounded-xl text-xs font-bold uppercase border-2 border-amber-900/20">Start Pre-Render</button>
+        <div id="render-status" class="hidden glass px-4 py-2 rounded-xl text-[10px] uppercase font-bold text-amber-900 flex items-center">
+         Bin: <span id="frame-count" class="ml-2">0</span> / <span id="total-frames" class="ml-1">0</span>
+        <button id="btn-reset" class="btn-ui px-5 py-2 rounded-xl text-xs font-bold uppercase">Reset</button>
+    </div>
+
+    <script type="module">
+        import initWasm, { readParquet } from 'https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+        import { tableFromIPC } from 'https://cdn.jsdelivr.net/npm/apache-arrow@16.0.0/+esm';
+
+        class ChromaFiberEngine {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                
+                this.mouse = { x: 0, y: 0 };
+                this.lastMouse = { x: 0, y: 0 };
+                this.drag = false;
+
+                this.camera = {
+                    rotX: 0.5, rotY: 0,
+                    tRotX: 0.5, tRotY: 0,
+                    zoom: 1.2,
+                    cx: 1, sx: 0, cy: 1, sy: 0 // Precomputed trig values
+                };
+
+                this.settings = {
+                    autoRot: true,
+                    showBeads: true,
+                    showLoops: true,
+                    render: {active: false,      // Is a sequence currently playing?
+                            export: false,      // Should it trigger file downloads?
+                            currentFrame: 0,    // Current bin index
+                            totalFrames: 0,     // Total bins to process
+                            delay: 50           // Milliseconds between frames (for download stability)
+                        }
+                };
+
+                this.points = [];
+                this.tads = [];
+                this.parquetData = [];
+
+                this.hoveredBin = null;
+                this.hoveredTAD = null;
+
+                this.pinned= false;
+                this.activeBin= null;
+
+                this.cache = {
+                    spline: [],
+                    beads: [],
+                    loops: []
+                };
+
+
+                this.resize();
+                this.initListeners();
+            }
+
+            resize() {
+                const dpr = window.devicePixelRatio || 1;
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+
+                // Fix High-DPI stretching bug
+                this.canvas.width = this.width * dpr;
+                this.canvas.height = this.height * dpr;
+                this.canvas.style.width = `${this.width}px`;
+                this.canvas.style.height = `${this.height}px`;
+
+                this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+                this.ctx.scale(dpr, dpr);
+            }
+
+            async loadParquet() {
+                try {
+                    // 1. Initialize WebAssembly
+                    await initWasm('https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm_bg.wasm');
+                    
+                    // 2. Fetch the Parquet file
+                    const response = await fetch('./mouse.parquet');
+                    if (!response.ok) throw new Error("Parquet file missing.");
+                    
+                    const buffer = await response.arrayBuffer();
+                    
+                    // 3. Parse Parquet into a WebAssembly Table
+                    const wasmTable = readParquet(new Uint8Array(buffer));
+                    
+                    // 4. Transfer the WebAssembly Table into standard JavaScript memory
+                    const jsTable = tableFromIPC(wasmTable.intoIPCStream());
+
+                    // 5. Convert to Array and map the columns exactly as they appear in your terminal
+                    this.parquetData = jsTable.toArray().map(row => ({
+                        chr: row.chr || "chr3",
+                        start: Number(row.start),
+                        end: Number(row.end),
+                        gene_id: row.gene_id || "Unknown",
+                        gene_name: row.gene_name || "Unknown"
+                    }));
+
+                    this.parquetData.sort((a, b) => a.start - b.start);
+                    console.log("Loaded parquet rows:", this.parquetData.length);
+                    
+                } catch (err) {
+                    console.error("Parquet Load Error:", err);
+                }
+            }
+
+            findMetadataForTAD(start, end) {
+                return this.parquetData.filter(row => row.start <= end && row.end >= start);
+            }
+
+            solveSpline(t, p0, p1, p2, p3) {
+                return 0.5 * (
+                    (2 * p1) +
+                    (-p0 + p2) * t +
+                    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
+                    (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t
+                );
+            }
+
+            preprocess(data) {
+                this.data = data;
+                const { x, y, z,Chromosom,start,end,loops, tad_boundaries } = data;
+                const N = x.length;
+                this.REGION_START = start;
+                this.REGION_END = end;
+                this.CHR = Chromosom;
+
+                this.BIN_SIZE = (this.REGION_END - this.REGION_START) / N;
+
+                // Center points around origin
+                const avg = {
+                    x: x.reduce((a, b) => a + b, 0) / N,
+                    y: y.reduce((a, b) => a + b, 0) / N,
+                    z: z.reduce((a, b) => a + b, 0) / N
+                };
+
+                const pts = x.map((_, i) => ({
+                    x: x[i] - avg.x,
+                    y: y[i] - avg.y,
+                    z: z[i] - avg.z
+                }));
+
+                // BUILD TADS
+                this.tads = [];
+                for (let i = 0; i < tad_boundaries.length - 1; i++) {
+                    const startBin = tad_boundaries[i];
+                    const endBin = tad_boundaries[i + 1] - 1;
+
+                    this.tads.push({
+                        chr: this.CHR,
+                        id: i+1,
+                        startBin,
+                        endBin,
+                        genomicStart: this.REGION_START + startBin * this.BIN_SIZE,
+                        genomicEnd: this.REGION_START + (endBin + 1) * this.BIN_SIZE
+                    });
+                }
+
+                // BUILD POINTS
+                this.points = pts.map((p, i) => {
+                    const tadId = this.tads.findIndex(t => i >= t.startBin && i <= t.endBin);
+                    return { ...p, i, tad: tadId !== -1 ? tadId : null };
+                });
+
+                // COLORS
+                const colors = this.points.map(p => `hsl(${(p.tad * 137) % 360}, 70%, 60%)`);
+
+                // BEADS
+                this.cache.beads = this.points.map((p, i) => ({ ...p, color: colors[i] }));
+
+                // SPLINE
+                this.cache.spline = [];
+                const steps = 6;
+
+                for (let i = 0; i < N - 1; i++) {
+                    const get = idx => pts[Math.max(0, Math.min(N - 1, idx))];
+                    const p0 = get(i - 1), p1 = get(i), p2 = get(i + 1), p3 = get(i + 2);
+
+                    for (let j = 0; j < steps; j++) {
+                        const t = j / steps;
+                        this.cache.spline.push({
+                            x: this.solveSpline(t, p0.x, p1.x, p2.x, p3.x),
+                            y: this.solveSpline(t, p0.y, p1.y, p2.y, p3.y),
+                            z: this.solveSpline(t, p0.z, p1.z, p2.z, p3.z),
+                            color: colors[i],
+                            tad: this.points[i].tad
+                        });
+                    }
+                }
+
+                // LOOPS
+                this.cache.loops = (loops || []).map(lp => {
+                    const pA = pts[lp.a];
+                    const pB = pts[lp.b];
+                    const dist = Math.hypot(pA.x - pB.x, pA.y - pB.y, pA.z - pB.z);
+
+                    return {
+                        pA, pB,
+                        mid: {
+                            x: (pA.x + pB.x) / 2,
+                            y: (pA.y + pB.y) / 2 - dist * 0.6,
+                            z: (pA.z + pB.z) / 2
+                        },
+                        color: "#f43f5e"
+                    };
+                });
+
+                // Update UI Stats
+                document.getElementById('stat-nodes').textContent = N;
+                document.getElementById('stat-tads').textContent = this.tads.length;
+                document.getElementById('loading').style.display = 'none';
+            }
+
+            project(p) {
+                // Optimized: Using precomputed sin/cos instead of calculating per point
+                let x = p.x * this.camera.cy + p.z * this.camera.sy;
+                let z = -p.x * this.camera.sy + p.z * this.camera.cy;
+                let y = p.y * this.camera.cx - z * this.camera.sx;
+                z = p.y * this.camera.sx + z * this.camera.cx;
+
+                const f = 600 / (600 + z + 100);
+
+                return {
+                    x: x * f * this.camera.zoom + this.width / 2,
+                    y: y * f * this.camera.zoom + this.height / 2,
+                    z, f
+                };
+            }
+
+            updatePopup(idx) {
+                const point = this.points[idx];
+                const tad = this.tads[point.tad];
+                const chr = this.CHR;
+                if (!tad) return;
+
+                const metadata = this.findMetadataForTAD(tad.genomicStart, tad.genomicEnd);
+                const popup = document.getElementById('info-popup');
+                const uniqueMetadata = Array.from(new Map(metadata.map(m => [`${m.gene_id}-${m.gene_name}`, m])).values());
+
+                popup.style.display = 'block';
+                popup.style.left = (this.mouse.x + 20) + 'px';
+                popup.style.top = (this.mouse.y + 20) + 'px';
+
+                document.getElementById('pop-range').textContent = 
+                    `${chr}: ${Math.floor(tad.genomicStart).toLocaleString()} - ${Math.floor(tad.genomicEnd).toLocaleString()}`;
+
+                document.getElementById('pop-stats').innerHTML = `
+                    <div>TAD ID: <span class="text-[#73362D]">${tad.id}</span></div>
+                    <div>Bin Range: <span class="text-[#73362D]">${tad.startBin} - ${tad.endBin}</span></div>
+                    <div>Size: <span class="text-[#73362D]">${((tad.genomicEnd - tad.genomicStart) / 1000).toFixed(0)} kb</span></div>
+                `;
+
+                const metaContainer = document.getElementById('pop-meta');
+                
+                if (metadata.length > 0) {
+          
+                    const tableRows = uniqueMetadata.map(m => `
+                        <tr>
+                            <td class="font-mono text-[#3E4F63]">${m.gene_id}</td>
+                            <td class="text-[#8C4B45] font-semibold">${m.gene_name}</td>
+                        </tr>
+                    `).join('');
+
+                    metaContainer.innerHTML = `
+                        <div class="pop-table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Gene ID</th>
+                                        <th>Gene Name</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${tableRows}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    metaContainer.innerHTML = `<div class="meta-block text-slate-400">No genes in this TAD</div>`;
+                }
+            }
+
+            drawTube(p1, p2, color, active = true) {
+                const ctx = this.ctx;
+                const fog = Math.max(0.1, (p1.z + 200) / 400);
+                const w = 4 * p1.f;
+
+                ctx.globalAlpha = active ? 0.9 * fog : 0.04;
+                ctx.strokeStyle = color;
+                
+                // Outer Glow Stroke
+                ctx.beginPath();
+                ctx.lineWidth = w * 2.5;
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+
+                // Inner Core Stroke
+                ctx.beginPath();
+                ctx.lineWidth = w;
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+
+                ctx.globalAlpha = 1;
+            }
+
+            drawBead(p, color, hover = false, active = true) {
+                const ctx = this.ctx;
+                ctx.globalAlpha = active ? 1 : 0.08;
+
+                const r = (hover ? 8 : 5) * p.f;
+                const grad = ctx.createRadialGradient(
+                    p.x - r * 0.3, p.y - r * 0.3, r * 0.1, 
+                    p.x, p.y, r
+                );
+
+                grad.addColorStop(0, '#ffffff');
+                grad.addColorStop(0.2, color);
+                grad.addColorStop(1, '#000000');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (hover) {
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                ctx.globalAlpha = 1;
+            }
+
+            drawLoop(a, b, c, color) {
+                const ctx = this.ctx;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+                
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2 * a.f;
+                ctx.globalAlpha = 0.4;
+                ctx.stroke();
+                
+                ctx.setLineDash([]);
+                ctx.globalAlpha = 1;
+            }
+
+            draw() {
+                // 1. Schedule next frame ONLY if we are NOT in pre-render mode
+                // (In pre-render mode, we call draw() manually via a loop to control frame-perfect capture)
+                if (!this.settings.render.active) {
+                    requestAnimationFrame(() => this.draw());
+                }
+
+                if (!this.data) return;
+
+                const ctx = this.ctx;
+                ctx.clearRect(0, 0, this.width, this.height);
+
+                // 2. Determine the visible limit
+                const isRendering = this.settings.render.active;
+                const limit = isRendering ? this.settings.render.currentFrame : this.points.length;
+
+                // 3. Camera Rotation
+                // Disable auto-orbiting during pre-render to keep the camera stable for the video
+                if (this.settings.autoRot && !isRendering) this.camera.tRotY += 0.003;
+
+                this.camera.rotX += (this.camera.tRotX - this.camera.rotX) * 0.1;
+                this.camera.rotY += (this.camera.tRotY - this.camera.rotY) * 0.1;
+
+                this.camera.cx = Math.cos(this.camera.rotX); this.camera.sx = Math.sin(this.camera.rotX);
+                this.camera.cy = Math.cos(this.camera.rotY); this.camera.sy = Math.sin(this.camera.rotY);
+
+                const renderList = [];
+
+                // 4. Interaction / Hover Detection (Skip if rendering to save CPU)
+                let hovered = null;
+                if (!isRendering) {
+                    let minDist = 18;
+                    this.cache.beads.forEach(b => {
+                        const p = this.project(b);
+                        const d = Math.hypot(p.x - this.mouse.x, p.y - this.mouse.y);
+                        if (d < minDist) { minDist = d; hovered = b.i; }
+                    });
+
+                    if (this.pinned) {
+                        this.hoveredBin = this.activeBin;
+                        this.hoveredTAD = this.points[this.activeBin].tad;
+                    } else {
+                        this.hoveredBin = hovered;
+                        this.hoveredTAD = hovered !== null ? this.points[hovered].tad : null;
+                    }
+                }
+
+                // 5. Build Render List: SPLINE
+                const ptsPerBin = this.cache.spline.length / this.points.length;
+                const splineLimit = Math.floor(limit * ptsPerBin);
+
+                for (let i = 0; i < splineLimit - 1; i++) {
+                    const seg = this.cache.spline[i];
+                    const p1 = this.project(seg);
+                    const p2 = this.project(this.cache.spline[i + 1]);
+
+                    renderList.push({
+                        z: (p1.z + p2.z) / 2,
+                        render: () => {
+                            // Dim logic: only apply if NOT rendering and a TAD is hovered
+                            const active = isRendering || (this.hoveredTAD === null || seg.tad === this.hoveredTAD);
+                            this.drawTube(p1, p2, seg.color, active);
+                        }
+                    });
+                }
+
+                // 6. Build Render List: BEADS
+                if (this.settings.showBeads) {
+                    for (let i = 0; i < limit; i++) {
+                        const b = this.cache.beads[i];
+                        const p = this.project(b);
+                        renderList.push({
+                            z: p.z,
+                            render: () => {
+                                const active = isRendering || (this.hoveredTAD === null || b.tad === this.hoveredTAD);
+                                this.drawBead(p, b.color, hovered === b.i, active);
+                            }
+                        });
+                    }
+                }
+
+                // 7. Build Render List: LOOPS (Usually only shown at the end or if not rendering)
+                if (this.settings.showLoops && !isRendering) {
+                    this.cache.loops.forEach(lp => {
+                        const a = this.project(lp.pA), b = this.project(lp.pB), c = this.project(lp.mid);
+                        renderList.push({
+                            z: (a.z + b.z + c.z) / 3,
+                            render: () => this.drawLoop(a, b, c, lp.color)
+                        });
+                    });
+                }
+
+                // 8. Depth Sort and Execute Draw
+                renderList.sort((a, b) => b.z - a.z);
+                renderList.forEach(item => item.render());
+
+                // 9. Update UI Popup (Only in Interactive mode)
+                if (!isRendering) {
+                    if (!this.pinned && this.hoveredBin !== null) {
+                        this.updatePopup(this.hoveredBin);
+                    } else if (!this.pinned) {
+                        document.getElementById('info-popup').style.display = 'none';
+                    }
+                }
+            }
+
+            async startPreRender() {
+                const s = this.settings.render;
+                let folderHandle = null;
+
+                if (s.export) {
+                    try {
+                        // 1. Request access to a directory
+                        const rootHandle = await window.showDirectoryPicker();
+                        
+                        // 2. Create (or get) a specific sub-folder so we don't clutter the root
+                        folderHandle = await rootHandle.getDirectoryHandle(fileName, { create: true });
+                        
+                        // 3. Clear any existing files (optional) or just warn the user
+                        console.log("Folder access granted. Starting sequence...");
+                    } catch (err) {
+                        console.error("Directory access denied:", err);
+                        s.active = false;
+                        return;
+                    }
+                }
+
+                s.active = true;
+                s.currentFrame = 0;
+                s.totalFrames = this.points.length;
+                
+                document.getElementById('render-status').style.display = 'flex';
+                document.getElementById('total-frames').textContent = s.totalFrames;
+
+                const renderStep = async () => {
+                    this.draw(); // Draw the current frame
+                    
+                    if (s.export && folderHandle) {
+                        // Convert canvas to a Blob (Binary Image)
+                        const blob = await new Promise(res => this.canvas.toBlob(res, 'image/png'));
+                        
+                        // Create a file handle for this specific frame
+                        const fileName = `frame_${String(s.currentFrame).padStart(4, '0')}.png`;
+                        const fileHandle = await folderHandle.getFileHandle(fileName, { create: true });
+                        
+                        // Write the blob to the file
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                    }
+
+                    document.getElementById('frame-count').textContent = s.currentFrame;
+                    s.currentFrame++;
+
+                    if (s.currentFrame < s.totalFrames) {
+                        // We use requestAnimationFrame or a small timeout to keep UI responsive
+                        await new Promise(resolve => setTimeout(resolve, s.delay));
+                        await renderStep();
+                    } else {
+                        s.active = false;
+                        document.getElementById('render-status').style.display = 'none';
+                        alert("Success! All frames saved to the folder.");
+                    }
+                };
+
+                await renderStep();
+            }
+
+            initListeners() {
+                window.addEventListener('resize', () => this.resize());
+
+                this.canvas.addEventListener('mousemove', e => {
+                    this.mouse.x = e.clientX;
+                    this.mouse.y = e.clientY;
+
+                    if (this.drag) {
+                        const dx = e.clientX - this.lastMouse.x;
+                        const dy = e.clientY - this.lastMouse.y;
+
+                        this.camera.tRotY += dx * 0.01;
+                        this.camera.tRotX += dy * 0.01;
+
+                        this.lastMouse = { x: e.clientX, y: e.clientY };
+                    }
+                });
+
+                this.canvas.addEventListener('mousedown', e => {
+                    this.drag = true;
+                    this.lastMouse = { x: e.clientX, y: e.clientY };
+
+                    if (this.hoveredBin !== null && !this.pinned) {
+                      this.pinned = true;
+                      this.activeBin= this.hoveredBin;
+                    }else{
+                      this.pinned =false;
+                      this.activeBin= null
+                    }
+                });
+
+                window.addEventListener('mouseup', () => this.drag = false);
+
+                this.canvas.addEventListener('wheel', e => {
+                    e.preventDefault();
+                    this.camera.zoom *= e.deltaY < 0 ? 1.1 : 0.9;
+                }, { passive: false });
+            }
+        }
+
+        // Setup Engine
+        const engine = new ChromaFiberEngine('viewer3d');
+
+        // UI Event Binders
+        const bind = (id, fn) => {
+            const el = document.getElementById(id);
+            el.onclick = () => {
+                const state = fn();
+                el.classList.toggle('active', state);
+            };
+        };
+
+        bind('btn-rot', () => engine.settings.autoRot = !engine.settings.autoRot);
+        bind('btn-beads', () => engine.settings.showBeads = !engine.settings.showBeads);
+
+        document.getElementById('btn-reset').onclick = () => {
+            engine.camera.tRotX = 0.5;
+            engine.camera.tRotY = 0;
+            engine.camera.zoom = 1.2;
+        };
+
+        document.getElementById('btn-render').onclick = async () => {
+            
+            engine.settings.render.export = confirm("Export PNGs to files? (Cancel to just animate sequence)");
+            // 2. Set timing: faster for preview, slower for stable downloads
+            engine.settings.render.delay = engine.settings.render.export ? 150 : 20;
+            engine.settings.autoRot = !engine.settings.autoRot;
+            // 3. Show the status counter UI
+            const statusEl = document.getElementById('render-status');
+            if(statusEl) statusEl.style.display = 'flex';
+
+            // 4. Start the process
+            await engine.startPreRender();
+
+            // 5. Hide status when done
+            if(statusEl) statusEl.style.display = 'none';
+
+        };
+
+        // Dummy Data Generator (Resilience Fallback if Fetch Fails)
+        const generateDummyData = () => {
+            const N = 500, x = [], y = [], z = [];
+            let cx = 0, cy = 0, cz = 0;
+            for (let i = 0; i < N; i++) {
+                cx += (Math.random() - 0.5) * 20;
+                cy += (Math.random() - 0.5) * 20;
+                cz += (Math.random() - 0.5) * 20;
+                x.push(cx); y.push(cy); z.push(cz);
+            }
+            return {
+                x, y, z,
+                tad_boundaries: [0, 100, 250, 380, 500],
+                loops: [{ a: 10, b: 90 }, { a: 120, b: 240 }, { a: 270, b: 350 }]
+            };
+        };
+
+        // Main Boot Loop
+        (async () => {
+            await engine.loadParquet();
+
+            let data;
+            try {
+                const response = await fetch('./chromatin_data.json');
+                if (!response.ok) throw new Error("JSON file missing.");
+                data = await response.json();
+            } catch (err) {
+                console.warn("Could not load JSON structure. Generating procedural structure so the UI works.");
+                data = generateDummyData();
+            }
+
+            engine.preprocess(data);
+            engine.draw();
+        })();
+    </script>
+</body>
+  </html>
